@@ -1,0 +1,656 @@
+---
+title: "Term Project"
+author: "Srilakshmi Bodduluru"
+date: "5/26/2020"
+output: word_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE,warning=FALSE, message=FALSE)
+
+setwd("~/InniFiles/Inni/Bellevue/DSC-630")
+#install.packages("ggplot2")
+#install.packages("pastecs")
+#install.packages("e1071")
+
+library(ggplot2)
+library(pastecs)
+library(e1071)
+library(purrr)
+library(tidyr)
+library(reshape)
+library(gridExtra)
+library(tidyverse)
+library(date)
+library(testthat)
+library(lubridate)
+
+
+```
+## Import and save data
+
+ # read data into dataframe 
+accident_data = read.csv("Term_project/US_Accidents_Dec19.csv")
+
+ # dimension of the dataframe
+dim(accident_data)
+
+[1] 2974335      49
+
+ # create subset of wake county data
+Wake_accident_data <- subset(accident_data, County == "Wake")
+
+ #dimension of wake_accident_data
+dim(Wake_accident_data)
+
+[1] 52640    49
+
+ # write csv file using wake county data for further use
+
+write.csv(Wake_accident_data,"C:\\Users\\Inni\\Documents\\InniFiles\\Inni\\Bellevue\\DSC-630\\Wake_accident_data.csv", row.names = FALSE)
+
+```{r}
+
+Wake_county_data <- read_csv("Wake_accident_data.csv")
+
+head(Wake_county_data )
+
+```
+
+
+```{r}
+
+dim(Wake_county_data )
+
+names(Wake_county_data )
+
+```
+
+```{r}
+# rename columns
+
+names(Wake_county_data)[11] <- "Distance"
+names(Wake_county_data)[24] <- "Temperature"
+names(Wake_county_data)[25] <- "Wind_Chill"
+names(Wake_county_data)[26] <- "Humidity"
+names(Wake_county_data)[27] <- "Pressure"
+names(Wake_county_data)[28] <- "Visibility"
+names(Wake_county_data)[30] <- "Wind_Speed"
+names(Wake_county_data)[31] <- "Precipitation"
+
+names(Wake_county_data)
+
+```
+
+```{r}
+# select important columns
+
+selcected_data <- Wake_county_data 
+
+head(selcected_data)
+dim(selcected_data)
+
+```
+
+```{r}
+
+str(selcected_data)
+
+```
+
+```{r}
+
+# find unique values in Severity
+
+unique(selcected_data$Severity)
+
+```
+
+```{r}
+## Numeric variables
+selcected_data %>%
+    select(Severity,
+           `Distance`,
+           `Temperature`,
+           `Wind_Chill`,
+           `Humidity`,
+           `Pressure`,
+           `Visibility`,
+           `Wind_Speed`,
+           `Precipitation`) %>%
+    summary()
+
+```
+
+Precipitation do not seem to be of big importance so I will try to remove it.There are 33755 missing values in wind_chill. I will try to remove it as well.
+
+
+##Remove outliers
+
+
+```{r}
+# Convert Start_Time and End_Time to datetypes
+rm_data <- selcected_data
+
+rm_data$Start_Time <- as.POSIXct(strptime(rm_data$Start_Time, format="%Y-%m-%d %H:%M:%S"))
+                                
+rm_data$End_Time <- as.POSIXct(strptime(rm_data$End_Time, format="%Y-%m-%d %H:%M:%S"))
+
+rm_data$td <- difftime(rm_data$End_Time,rm_data$Start_Time, units="mins")
+
+rm_data$td[rm_data$td <= 0]
+
+```
+No negative time difference values.
+
+
+
+```{r}
+
+myvars <- c('Source','TMC','Severity','Start_Time','End_Time','Start_Lng','Start_Lat','Distance','Street','Side','City','Zipcode','Temperature','Humidity','Pressure','Visibility','Wind_Direction','Wind_Speed','Weather_Condition','Amenity','Bump','Crossing','Give_Way','Junction','No_Exit','Railway','Roundabout','Station','Stop','Traffic_Calming','Traffic_Signal','Turning_Loop','Sunrise_Sunset')
+
+new_data <- rm_data[myvars]
+dim(new_data)
+
+# create new dataset without missing data
+newdata <- na.omit(new_data)
+
+dim(newdata)
+
+```
+
+```{r}
+# extract year, month, day and time values
+
+newdata$Start_Time <- as_datetime(newdata$Start_Time)
+newdata$End_Time <- as_datetime(newdata$End_Time)
+newdata$Accident_duration <- round(abs((newdata$Start_Time-newdata$End_Time)/60))
+newdata$Year <- as.numeric(format(newdata$Start_Time,format="%Y"))
+newdata$month <- as.numeric(format(newdata$Start_Time,format="%m"))
+newdata$date <- as.numeric(format(newdata$Start_Time,format="%d"))
+newdata$weekday <- weekdays(newdata$Start_Time)
+newdata$Hour <-as.numeric(format(newdata$Start_Time,format="%H"))
+newdata$minutes <-as.numeric(format(newdata$Start_Time,format="%m"))
+newdata$second <-as.numeric(format(newdata$Start_Time,format="%s"))
+str(newdata)
+
+```
+
+##Plots
+
+```{r}
+
+# plot bar chart for Severity
+
+ ggplot(newdata, aes(x=as.factor(Severity), fill=as.factor(Severity) )) +  
+      geom_bar( ) +
+      ggtitle("Bar chart for Severity") + xlab("Severity") +labs(fill = "Severity")
+
+```
+
+```{r fig.width=15, fig.height=10}
+# quick plot of numeric variables
+
+newdata %>%
+  keep(is.numeric) %>% 
+  gather() %>% 
+  ggplot(aes(value)) +
+    facet_wrap(~ key, scales = "free") +
+    geom_histogram()+ ggtitle("Histograms")
+
+```
+```{r}
+
+## Boolean variables
+newdata %>%
+    select(Amenity:Turning_Loop) %>%
+    summary()
+
+```
+
+##Plots for categorical variables
+
+```{r}
+## Graphical representation
+traffic_vars <- newdata %>%
+    select(Amenity:Turning_Loop) %>%
+    pivot_longer( cols = Amenity:Turning_Loop,
+        names_to = 'Annotation',
+        values_to = 'Trues') %>%
+    filter(Trues == TRUE) %>%
+    group_by(Annotation) %>%
+    summarise(Total = n())
+traffic_vars %>%
+    ggplot() +
+    geom_bar(aes(y = Total,
+                 x = reorder(Annotation, Total, FUN = abs),
+                 fill = Total),
+             stat = 'identity') +
+    coord_flip() +
+    labs(x = NULL) +
+    theme(legend.position="none")+
+    ggtitle("Amount of Accidents near Traffic Signals")
+
+```
+
+
+```{r}
+## Amount of accidents per City
+newdata %>%
+    select(City) %>%
+    group_by(City) %>%
+    summarise(Total = n()) %>%
+    ggplot() +
+    geom_bar(aes(y = Total,
+                 x = reorder(City, Total, FUN = abs),
+                 fill = Total),
+             stat = 'identity') +
+    coord_flip() +
+    labs(x = NULL) +
+    theme(legend.position="none")+
+ ggtitle("Amount of Accidents per City")
+
+
+```
+
+```{r}
+
+##Year with highest accidents
+
+year <- newdata %>% select(Year) %>% group_by(Year) %>% summarise(total.count=n()) %>% arrange(total.count)
+ggplot(year , aes(x=Year, y=total.count)) + geom_bar(stat="identity", fill = "lightblue")+ggtitle("Amount of Accidents per Year")
+
+```
+```{r}
+# Accidents by month and week in wake county
+
+wd <- newdata %>% group_by(weekday,month) %>% count()
+wd$weekday <- factor(wd$weekday,levels = c("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"))
+
+ggplot(wd, aes(fill=weekday,y=n, x=month))+ geom_bar(position="dodge",stat="identity")+scale_x_continuous(breaks=seq(0,12,1))+ggtitle("Accidents by Month and Week in Wake County")
+
+```
+
+```{r}
+## Month/Year
+
+newdata %>%
+    select(Start_Time) %>%
+    transmute(Month = month(Start_Time,
+                            label = T),
+              Year = year(Start_Time)) %>%
+    filter(Year != 2015) %>% # only 7 accidents overall
+    group_by(Year, Month) %>%
+    summarise(`No of accidents` = n()) %>%
+    ggplot(aes(x = Month, y = `No of accidents`)) +
+    geom_bar(stat = 'identity') +
+    facet_grid(~Year)  +
+    theme(axis.text.x = element_text(angle = 90))+ggtitle("Accidents by Month and Year in Wake County")
+
+```
+
+```{r}
+##Hour
+newdata %>% 
+  group_by(Hour) %>% 
+  summarize(total.count=n()) %>%
+    ggplot(aes(x=Hour, y=total.count)) +
+    geom_bar(stat="identity", fill="steelblue")+
+    geom_text(aes(label=Hour), vjust=1.6, color="black", size=3)+
+    scale_x_continuous(breaks = round(seq(0, 24, by = 2),0)) +
+    ggtitle("Total Accidents by Hours from 2016 to 2019") +
+    xlab("Hours") + ylab("Total Accidents")+
+    theme(plot.title = element_text(hjust = 0.5), panel.background = element_blank())
+
+```
+
+```{r fig.width=15, fig.height=8}
+#total Weather Condition for accidents
+Weather <- newdata %>% group_by(Weather_Condition) %>% count()
+# Create data
+data <- data.frame(
+  name=c("Clear", "Haze" , "Heavy Rain", "Light Rain" ,"Overcast",	"Partly Cloudy" ,"Mostly Cloudy	" ,"Scattered Clouds","Snow") ,  
+  value=c(337126,	19192,2221, 25437,108597,69114,84932,56848,252))
+  
+# Barplot
+ggplot(data, aes(fill = name, x=name, y=value)) + 
+  geom_bar(stat = "identity")+ggtitle("Accidents by Weather Condition")
+
+
+```
+
+
+```{r}
+data_num <- select_if(newdata, is.numeric)             # Subset numeric columns with dplyr
+head(data_num)
+
+#install.packages("funModeling")
+
+library( funModeling)
+correlation_table(data=data_num, target="Severity")
+
+```
+
+```{r}
+
+library(corrplot)
+corrplot(cor(data_num))
+```
+
+```{r}
+# Set the list of features to include in Machine Learning
+
+feature_lst <- c('TMC','Severity','Start_Lng','Start_Lat','Distance','Side','City','Temperature','Humidity','Pressure', 'Visibility','Wind_Direction','Weather_Condition','Amenity','Bump','Crossing','Give_Way','Junction','No_Exit','Railway','Roundabout','Station','Stop','Traffic_Calming','Traffic_Signal','Sunrise_Sunset','Hour','weekday', 'Accident_duration')
+
+sel_data <- newdata[feature_lst]
+
+dim(sel_data)
+
+```
+
+
+```{r}
+#install.packages("caret", dependencies = c("Depends", "Suggests"))
+#Loading caret package
+library("caret")
+
+#Converting every categorical variable to numerical using dummy variables
+dmy <- dummyVars(" ~ .", data = sel_data,fullRank = T)
+
+newdata_transformed <- data.frame(predict(dmy, newdata = sel_data))
+
+#Checking the structure of transformed train file
+str(newdata_transformed)
+
+summary(newdata_transformed$Severity)
+
+```
+
+```{r}
+
+#Converting the dependent variable back to categorical
+newdata_transformed$Severity<- factor(newdata_transformed$Severity,levels = c(1,2,3,4),labels=c("low","medium","high","extreme"))
+
+
+summary(newdata_transformed)
+
+newdata_transformed <- na.omit(newdata_transformed)
+
+write.csv(newdata_transformed,"C:\\Users\\Inni\\Documents\\InniFiles\\Inni\\Bellevue\\DSC-630\\newdata_transformed.csv", row.names = FALSE)
+
+```
+
+```{r}
+#install.packages("randomForest")
+library(randomForest)
+library(mlbench)
+library(caret)
+set.seed(100)
+
+data(newdata_transformed)  
+
+inTraining <- createDataPartition(newdata_transformed$Severity, p = 0.75, list = FALSE)
+training <- newdata_transformed[inTraining, ]
+testing <- newdata_transformed[-inTraining, ]
+modelFit <- train( Severity~.,data=training, method="rpart")  
+
+varImp(modelFit)
+
+```
+## h2o 
+
+```{r}
+# Finally, let's load H2O and start up an H2O cluster
+
+library(h2o)
+
+h2o.init(max_mem_size = "20g")
+
+# http://localhost:54321
+
+```
+
+
+```{r}
+# import dataset (wake county)
+
+wakecounty_dataset_path <- "C:/Users/Inni/Documents/InniFiles/Inni/Bellevue/DSC-630/newdata_transformed.csv"
+
+wakecounty_data.hex <- h2o.importFile(path = wakecounty_dataset_path, destination_frame = "wakecounty_data.hex")
+
+#str(wakecounty_data.hex)
+
+# Split dataset giving the training dataset 75% of the data
+wakecounty_data.split <- h2o.splitFrame(data=wakecounty_data.hex, ratios=0.75)
+
+# Create a training set from the 1st dataset in the split
+wakecounty_data.train <- wakecounty_data.split[[1]]
+
+# Create a testing set from the 2nd dataset in the split
+wakecounty_data.test <- wakecounty_data.split[[2]]
+
+```
+```{r}
+print(dim(wakecounty_data.hex))
+print(dim(wakecounty_data.train))
+print(dim(wakecounty_data.test))
+
+```
+```{r}
+col_names <- colnames(wakecounty_data.train)
+class(col_names)
+drops <- c("Severity")
+x_data <- wakecounty_data.train[ , !(names(wakecounty_data.train) %in% drops)]
+col_names_x <- colnames(x_data)
+#col_names_x
+
+summary( wakecounty_data.train$Severity)
+
+```
+
+
+```{r}
+
+
+# Generate a GLM model using the training dataset. x represesnts the predictor column, and y represents the target index.
+wakecounty_data.glm <- h2o.glm(y = "Severity",
+                        x = c(col_names_x),
+                        training_frame=wakecounty_data.train,
+                        family="multinomial",
+                        nfolds=5,
+                        alpha=0.5,keep_cross_validation_predictions = TRUE,seed = 1122)
+
+
+```
+
+
+```{r}
+# Coefficients that can be applied to the non-standardized data
+h2o.coef(wakecounty_data.glm)
+
+# Coefficients fitted on the standardized data (requires standardize=TRUE, which is on by default)
+h2o.coef_norm(wakecounty_data.glm)
+
+# Print the coefficients table
+wakecounty_data.glm@model$coefficients_table
+
+# Print the standard error
+wakecounty_data.glm@model$coefficients_table$std_error
+
+# Print the p values
+wakecounty_data.glm@model$coefficients_table$p_value
+
+# Print the z values
+wakecounty_data.glm@model$coefficients_table$z_value
+
+# Retrieve a graphical plot of the standardized coefficient magnitudes
+h2o.std_coef_plot(wakecounty_data.glm)
+
+
+```
+```{r}
+# Variable Importance
+h2o.varimp_plot(wakecounty_data.glm)
+
+h2o.varimp(wakecounty_data.glm)
+```
+
+```{r}
+# retrieve the model performance
+perf_glm <- h2o.performance(wakecounty_data.glm, wakecounty_data.test)
+perf_glm
+
+h2o.confusionMatrix(perf_glm)
+
+```
+
+
+
+```{r}
+# Predict using the glm model and the testing dataset
+pred_glm <- h2o.predict(object=wakecounty_data.glm, newdata=wakecounty_data.test)
+pred_glm
+
+```
+
+
+
+```{r}
+
+#Random Forest
+
+rforest.model <- h2o.randomForest(y = "Severity",
+                        x = c(col_names_x),
+                        training_frame=wakecounty_data.train, ntrees = 100, mtries = 3, max_depth = 20, 
+                        seed = 1122,keep_cross_validation_predictions = TRUE,nfolds=5)
+
+
+
+```
+
+```{r}
+# model performance
+h2o.performance(rforest.model)
+
+#check variable importance
+h2o.varimp_plot(rforest.model)
+
+```
+
+```{r}
+# Predict using the random forest model and the testing dataset
+pred_rfm <- h2o.predict(object=rforest.model, newdata=wakecounty_data.test)
+pred_rfm
+
+h2o.confusionMatrix(rforest.model)
+
+```
+
+
+```{r}
+#GBM
+gbm.model <- h2o.gbm(y="Severity", x=c(col_names_x), training_frame = wakecounty_data.train, ntrees = 1000, max_depth = 10, learn_rate = 0.01, seed = 1122, keep_cross_validation_predictions = TRUE,nfolds=5)
+
+
+h2o.performance (gbm.model)
+
+```
+
+```{r}
+#check variable importance
+h2o.varimp_plot(gbm.model)
+
+```
+
+```{r}
+
+#making predictions using gbm
+predict.gbm <- as.data.frame(h2o.predict(gbm.model, wakecounty_data.test))
+
+#predict.gbm
+
+#confusion matrix
+h2o.confusionMatrix(gbm.model)
+
+```
+
+```{r}
+
+perf <- h2o.performance(gbm.model, wakecounty_data.test)
+print(perf)
+
+```
+
+
+
+```{r}
+#deep learning models
+dlearning.model <- h2o.deeplearning(y="Severity", x=c(col_names_x), training_frame = wakecounty_data.train,
+             epoch = 80,
+             hidden = c(100,100),
+             activation = "Rectifier",
+             seed = 1122,keep_cross_validation_predictions = TRUE,nfolds=5)
+
+perf_dl <- h2o.performance(dlearning.model)
+
+perf_dl
+```
+```{r}
+#check variable importance
+h2o.varimp_plot(dlearning.model)
+
+h2o.varimp(dlearning.model)
+```
+```{r}
+#making predictions using deep learning model
+predict.dlearning <- h2o.predict(dlearning.model, wakecounty_data.test)
+
+#predict.dlearning
+
+#confusion matrix
+h2o.confusionMatrix(dlearning.model)
+
+```
+
+
+```{r}
+
+
+ensemble <- h2o.stackedEnsemble(y="Severity", x=c(col_names_x), training_frame = wakecounty_data.train,
+                                model_id = "my_ensemble_binomial", base_models = list(wakecounty_data.glm,
+                                rforest.model,gbm.model, dlearning.model))
+
+# Generate predictions on a test set (if neccessary)
+pred_ensemble <- h2o.predict(ensemble, newdata = wakecounty_data.test)
+
+# Eval ensemble performance on a test set
+perf_ensemble <- h2o.performance(ensemble, newdata = wakecounty_data.test)
+perf_ensemble
+
+```
+
+
+
+
+
+
+### References:
+
+https://towardsdatascience.com/a-comprehensive-machine-learning-workflow-with-multiple-modelling-using-caret-and-caretensemble-in-fcbf6d80b5f2
+
+https://www.analyticsvidhya.com/blog/2016/12/practical-guide-to-implement-machine-learning-with-caret-package-in-r-with-practice-problem/
+
+https://www.kaggle.com/sobhanmoosavi/us-accidents
+
+https://www.hindawi.com/journals/mpe/2013/547904/
+
+http://h2o-release.s3.amazonaws.com/h2o/rel-zahradnik/1/docs-website/h2o-docs/data-munging/splitting-datasets.html
+
+https://www.analyticsvidhya.com/blog/2016/05/h2o-data-table-build-models-large-data-sets/
+
+http://docs.h2o.ai/h2o/latest-stable/h2o-docs/data-science/stacked-ensembles.html#training-base-models-for-the-ensemble
+
+https://h2o-release.s3.amazonaws.com/h2o/master/4698/docs-website/h2o-docs/performance-and-prediction.html#accuracy
+
+https://towardsdatascience.com/evaluating-categorical-models-ii-sensitivity-and-specificity-e181e573cff8
+
